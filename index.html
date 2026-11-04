@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Analyseur de trames réseau</title>
+  <meta name="description" content="Analyseur de trames réseau dans le navigateur : lecture de fichiers pcap et pcapng, décodage Ethernet, VLAN, ARP, IPv4, IPv6, ICMP, TCP, UDP, DNS, HTTP, TLS, FTP, vue hexadécimale et détection d'anomalies.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0c0c0d; --panel: #161618; --border: #262628; --border-hi: #3a3a3d;
+      --text: #f2f2f2; --dim: #9b9b9f; --muted: #6c6c70; --accent: #c8102e; --line: #c9c9cc; --warn: #e0a458; --good: #8fd18f;
+      --mono: "JetBrains Mono", ui-monospace, monospace; --sans: "Inter", system-ui, sans-serif;
+      color-scheme: dark;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: var(--bg); color: var(--text); font-family: var(--sans); line-height: 1.55; -webkit-font-smoothing: antialiased; }
+    .wrap { max-width: 1320px; margin: 0 auto; padding: 24px max(16px, env(safe-area-inset-right, 0px)) 48px max(16px, env(safe-area-inset-left, 0px)); }
+    .top { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 24px; }
+    .back { font-size: 0.9rem; color: var(--dim); text-decoration: none; }
+    .back:hover { color: var(--accent); }
+    .lang { display: flex; border: 1px solid var(--border-hi); }
+    .lang button { font: 500 0.78rem var(--mono); letter-spacing: .05em; background: none; color: var(--dim); border: 0; padding: 5px 10px; cursor: pointer; }
+    .lang button + button { border-left: 1px solid var(--border-hi); }
+    .lang button[aria-pressed="true"] { background: var(--text); color: var(--bg); }
+    .eyebrow { font: 500 0.82rem var(--mono); color: var(--accent); letter-spacing: .04em; }
+    h1 { font-size: clamp(1.6rem, 3.4vw, 2.3rem); line-height: 1.15; margin: 6px 0 10px; text-wrap: balance; }
+    .intro { color: var(--dim); max-width: 84ch; }
+    .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 16px 18px; min-width: 0; }
+    .stack > * + * { margin-top: 16px; }
+    h2 { font: 600 0.78rem var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--dim); margin-bottom: 12px; }
+    .btn { font: 500 0.84rem var(--sans); background: none; color: var(--text); border: 1px solid var(--border-hi); border-radius: 6px; padding: 7px 12px; cursor: pointer; }
+    .btn:hover { border-color: var(--accent); color: var(--accent); }
+    .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .btn.primary:hover { filter: brightness(1.1); color: #fff; }
+    button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .load { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px; align-items: center; margin-top: 22px; }
+    .drop { border: 1px dashed var(--border-hi); border-radius: 8px; padding: 16px; display: flex; gap: 14px; align-items: center; flex-wrap: wrap; cursor: pointer; }
+    .drop.over { border-color: var(--accent); background: #1b1416; }
+    .drop b { font-weight: 600; }
+    .drop small { color: var(--dim); display: block; }
+    .file-name { font: 0.8rem var(--mono); color: var(--dim); }
+    .kpis { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; margin-top: 16px; }
+    .kpi { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; min-width: 0; }
+    .kpi dt { font: 0.7rem var(--mono); color: var(--dim); }
+    .kpi dd { font: 600 1.25rem var(--sans); font-variant-numeric: tabular-nums; }
+    .kpi.alert dd { color: var(--accent); }
+    .filter { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+    .filter input { font: 0.9rem var(--mono); background: var(--bg); color: var(--text); border: 1px solid var(--border-hi); border-radius: 6px; padding: 8px 10px; min-width: 0; }
+    .filter input.bad { border-color: var(--accent); }
+    .chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+    .chips button { font: 0.74rem var(--mono); background: none; color: var(--dim); border: 1px solid var(--border); border-radius: 999px; padding: 3px 10px; cursor: pointer; }
+    .chips button:hover { color: var(--text); border-color: var(--border-hi); }
+    .ferr { font-size: 0.8rem; color: var(--warn); margin-top: 6px; min-height: 1.2em; }
+    .list { max-height: 360px; overflow: auto; margin-top: 10px; border: 1px solid var(--border); border-radius: 6px; }
+    table { width: 100%; border-collapse: collapse; font: 0.78rem var(--mono); font-variant-numeric: tabular-nums; }
+    th, td { text-align: left; padding: 5px 8px; white-space: nowrap; border-bottom: 1px solid #1f1f22; }
+    th { position: sticky; top: 0; background: #1a1a1d; color: var(--dim); font-weight: 500; z-index: 1; }
+    td.info { white-space: normal; min-width: 280px; }
+    tbody tr { cursor: pointer; }
+    tbody tr:hover td { background: #1c1c1f; }
+    tbody tr[aria-selected="true"] td { background: #2a1418; }
+    tbody tr.flag td:first-child { box-shadow: inset 3px 0 0 var(--warn); }
+    tbody tr.danger td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+    .pr { display: inline-block; min-width: 46px; }
+    .detail { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+    .tree { font: 0.8rem/1.6 var(--mono); max-height: 420px; overflow: auto; }
+    .tree details { margin-left: 2px; }
+    .tree details details { margin-left: 16px; }
+    .tree summary, .tree .leaf { cursor: pointer; padding: 1px 4px; border-radius: 3px; list-style-position: inside; }
+    .tree .leaf { margin-left: 30px; }
+    .tree summary:hover, .tree .leaf:hover { background: #1f1f22; }
+    .tree .on { background: #3a1820 !important; }
+    .tree .k { color: var(--line); } .tree .v { color: var(--dim); }
+    .tree .layer > summary .k { color: var(--text); font-weight: 600; }
+    .tree .bad .v { color: var(--accent); }
+    .hex { font: 0.78rem/1.6 var(--mono); max-height: 420px; overflow: auto; white-space: pre; color: var(--dim); }
+    .hex .o { color: var(--muted); }
+    .hex span.b.on { background: var(--accent); color: #fff; border-radius: 2px; }
+    .hex span.a.on { background: #3a1820; color: var(--text); }
+    .two { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr); gap: 16px; align-items: start; }
+    .alerts { list-style: none; display: grid; gap: 6px; }
+    .alerts li { font-size: 0.85rem; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; align-items: baseline; padding: 7px 10px; border: 1px solid var(--border); border-radius: 6px; cursor: pointer; }
+    .alerts li:hover { border-color: var(--border-hi); }
+    .alerts .lv { font: 600 0.66rem var(--mono); letter-spacing: .06em; text-transform: uppercase; padding: 1px 6px; border-radius: 3px; border: 1px solid var(--warn); color: var(--warn); white-space: nowrap; }
+    .alerts .err .lv { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .alerts .info .lv { border-color: var(--line); color: var(--line); }
+    .alerts .ok { color: var(--good); border-color: #2e4a2e; display: block; cursor: default; }
+    .alerts code { font: 0.92em var(--mono); color: var(--text); }
+    .bars { display: grid; gap: 6px; }
+    .bar { display: grid; grid-template-columns: 70px minmax(0, 1fr) 44px; gap: 10px; align-items: center; font: 0.78rem var(--mono); }
+    .bar span:first-child { color: var(--dim); }
+    .bar i { display: block; height: 10px; background: var(--line); border-radius: 0 3px 3px 0; min-width: 2px; }
+    .bar b { font-weight: 500; text-align: right; }
+    .note { font-size: 0.82rem; color: var(--dim); margin-top: 10px; }
+    .empty { color: var(--dim); font-size: 0.9rem; padding: 12px 4px; }
+    [hidden] { display: none !important; }
+    @media (max-width: 1000px) { .detail, .two { grid-template-columns: minmax(0, 1fr); } .kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+    @media (max-width: 620px) { .load { grid-template-columns: minmax(0, 1fr); } .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="top">
+      <a class="back" href="https://valentin-auger-laboratoire.github.io/portfolio/#projets" data-t="back">← Retour au portfolio</a>
+      <div class="lang" role="group" aria-label="Langue / Language">
+        <button type="button" data-lang="fr" aria-pressed="true">FR</button>
+        <button type="button" data-lang="en" aria-pressed="false">EN</button>
+      </div>
+    </div>
+    <p class="eyebrow" data-t="eyebrow">Outil réseau · analyse de trafic</p>
+    <h1 data-t="title">Analyseur de trames réseau</h1>
+    <p class="intro" data-t="intro">Ouvrez une capture Wireshark ou tcpdump (.pcap, .pcapng) : chaque trame est décodée couche par couche, de l'Ethernet jusqu'à l'application, avec la vue hexadécimale des octets et une analyse qui repère les poignées de main TCP, les retransmissions, les scans de ports et les identifiants envoyés en clair. Le fichier est lu dans votre navigateur et n'est envoyé nulle part.</p>
+
+    <div class="load">
+      <label class="drop" id="drop" tabindex="0">
+        <input type="file" id="file" accept=".pcap,.pcapng,.cap" hidden>
+        <span style="font-size:1.6rem" aria-hidden="true">⤓</span>
+        <span><b data-t="dropB">Déposer un fichier .pcap ou .pcapng</b><small data-t="dropS">ou cliquer pour le choisir (lu localement)</small></span>
+        <span class="file-name" id="fname"></span>
+      </label>
+      <div class="row">
+        <button type="button" class="btn primary" id="sample" data-t="sample">Charger la capture d'exemple</button>
+        <button type="button" class="btn" id="dlSample" data-t="dlSample">Télécharger l'exemple (.pcap)</button>
+      </div>
+    </div>
+    <p class="note" data-t="sampleNote">Capture d'exemple générée par l'outil (scénario fictif reprenant le plan d'adressage du PoC de téléradiologie, identifiants de démonstration). Elle s'ouvre aussi dans Wireshark.</p>
+
+    <dl class="kpis" id="kpis"></dl>
+
+    <div class="stack" style="margin-top:16px">
+      <div class="panel">
+        <h2 data-t="listT">Trames</h2>
+        <div class="filter"><input id="flt" spellcheck="false" autocomplete="off" placeholder="tcp.port == 443 and ip.addr == 172.16.10.10" aria-label="filtre"><button type="button" class="btn" id="fltApply" data-t="apply">Filtrer</button></div>
+        <div class="chips" id="chips"></div>
+        <div class="ferr" id="ferr"></div>
+        <div class="list" id="list"></div>
+      </div>
+      <div class="panel">
+        <h2 id="detailT" data-t="detailT">Détail de la trame</h2>
+        <div class="detail"><div class="tree" id="tree"></div><div class="hex" id="hex"></div></div>
+      </div>
+      <div class="two">
+        <div class="panel"><h2 data-t="anaT">Analyse</h2><ul class="alerts" id="alerts"></ul></div>
+        <div class="stack">
+          <div class="panel"><h2 data-t="protoT">Protocoles</h2><div class="bars" id="bars"></div></div>
+          <div class="panel"><h2 data-t="convT">Conversations IP</h2><div style="overflow-x:auto" id="convs"></div></div>
+        </div>
+      </div>
+      <p class="note" data-t="foot">Protocoles décodés : Ethernet, 802.1Q, ARP, IPv4, IPv6, ICMP, TCP (options, sommes de contrôle), UDP, DNS (noms compressés), HTTP, TLS (Client Hello et SNI), FTP, Telnet. Filtres : nom de protocole, ip.addr, ip.src, ip.dst, tcp.port, udp.port, port, tcp.stream, vlan, frame.number, avec and, or, not et parenthèses. Le détail des champs reste en français.</p>
+    </div>
+  </div>
+
+  <script src="pcap.js"></script>
+  <script src="exemple.js"></script>
+  <script>
+  (() => {
+    'use strict';
+    const P = window.PcapAnalyser, E = window.ExempleCapture, $ = (id) => document.getElementById(id);
+    const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const T = {
+      fr: {
+        back: '← Retour au portfolio', eyebrow: 'Outil réseau · analyse de trafic', title: 'Analyseur de trames réseau',
+        intro: "Ouvrez une capture Wireshark ou tcpdump (.pcap, .pcapng) : chaque trame est décodée couche par couche, de l'Ethernet jusqu'à l'application, avec la vue hexadécimale des octets et une analyse qui repère les poignées de main TCP, les retransmissions, les scans de ports et les identifiants envoyés en clair. Le fichier est lu dans votre navigateur et n'est envoyé nulle part.",
+        dropB: 'Déposer un fichier .pcap ou .pcapng', dropS: 'ou cliquer pour le choisir (lu localement)', sample: "Charger la capture d'exemple", dlSample: "Télécharger l'exemple (.pcap)",
+        sampleNote: "Capture d'exemple générée par l'outil (scénario fictif reprenant le plan d'adressage du PoC de téléradiologie, identifiants de démonstration). Elle s'ouvre aussi dans Wireshark.",
+        kPk: 'Trames', kDur: 'Durée', kBytes: 'Octets', kStreams: 'Flux TCP', kHs: 'Poignées de main complètes', kAl: 'Alertes',
+        listT: 'Trames', apply: 'Filtrer', detailT: 'Détail de la trame', anaT: 'Analyse', protoT: 'Protocoles', convT: 'Conversations IP',
+        hNo: 'N°', hTime: 'Temps (s)', hSrc: 'Source', hDst: 'Destination', hProto: 'Protocole', hLen: 'Long.', hInfo: 'Info', hA: 'Hôte A', hB: 'Hôte B', hPk: 'Trames', hBy: 'Octets',
+        foot: 'Protocoles décodés : Ethernet, 802.1Q, ARP, IPv4, IPv6, ICMP, TCP (options, sommes de contrôle), UDP, DNS (noms compressés), HTTP, TLS (Client Hello et SNI), FTP, Telnet. Filtres : nom de protocole, ip.addr, ip.src, ip.dst, tcp.port, udp.port, port, tcp.stream, vlan, frame.number, avec and, or, not et parenthèses. Le détail des champs reste en français.',
+        none: 'Aucune trame ne correspond au filtre.', noFile: 'Chargez une capture pour commencer.', pick: 'Cliquez sur une trame pour voir son détail.', allGood: 'Aucune anomalie détectée.',
+        lvErr: 'Sécurité', lvWarn: 'À vérifier', lvInfo: 'Info', readErr: 'Lecture impossible : ',
+        a: {
+          clear: 'Trame {p} : identifiants en clair ({proto}) : <code>{v}</code>. Toute personne sur le chemin peut les lire ; il faut un protocole chiffré (HTTPS, SFTP, SSH).',
+          retrans: 'Trame {p} : retransmission TCP de la trame {of} (pas d\'acquittement reçu à temps).',
+          scan: 'Scan de ports : <code>{src}</code> a envoyé des SYN vers {n} ports différents de <code>{dst}</code> ({ports}).',
+          nxdomain: 'Trame {p} : le nom <code>{v}</code> n\'existe pas (réponse DNS « NXDOMAIN »).',
+          csum: 'Trame {p} : somme de contrôle incorrecte (trame altérée ou calcul déporté sur la carte réseau).',
+          summary: '{hs} poignée(s) de main TCP complète(s) sur {st} flux, {rst} flux interrompu(s) par RST, {un} SYN sans réponse.',
+        },
+      },
+      en: {
+        back: '← Back to portfolio', eyebrow: 'Network tool · traffic analysis', title: 'Network frame analyser',
+        intro: 'Open a Wireshark or tcpdump capture (.pcap, .pcapng): every frame is decoded layer by layer, from Ethernet up to the application, with the hexadecimal byte view and an analysis that spots TCP handshakes, retransmissions, port scans and cleartext credentials. The file is read in your browser and sent nowhere.',
+        dropB: 'Drop a .pcap or .pcapng file', dropS: 'or click to choose it (read locally)', sample: 'Load the sample capture', dlSample: 'Download the sample (.pcap)',
+        sampleNote: 'Sample capture generated by the tool (fictional scenario using the teleradiology PoC addressing plan, demo credentials). It also opens in Wireshark.',
+        kPk: 'Frames', kDur: 'Duration', kBytes: 'Bytes', kStreams: 'TCP streams', kHs: 'Complete handshakes', kAl: 'Alerts',
+        listT: 'Frames', apply: 'Filter', detailT: 'Frame details', anaT: 'Analysis', protoT: 'Protocols', convT: 'IP conversations',
+        hNo: 'No.', hTime: 'Time (s)', hSrc: 'Source', hDst: 'Destination', hProto: 'Protocol', hLen: 'Len.', hInfo: 'Info', hA: 'Host A', hB: 'Host B', hPk: 'Frames', hBy: 'Bytes',
+        foot: 'Decoded protocols: Ethernet, 802.1Q, ARP, IPv4, IPv6, ICMP, TCP (options, checksums), UDP, DNS (compressed names), HTTP, TLS (Client Hello and SNI), FTP, Telnet. Filters: protocol name, ip.addr, ip.src, ip.dst, tcp.port, udp.port, port, tcp.stream, vlan, frame.number, with and, or, not and parentheses. Field details stay in French.',
+        none: 'No frame matches the filter.', noFile: 'Load a capture to start.', pick: 'Click a frame to see its details.', allGood: 'No anomaly detected.',
+        lvErr: 'Security', lvWarn: 'Check', lvInfo: 'Info', readErr: 'Cannot read file: ',
+        a: {
+          clear: 'Frame {p}: cleartext credentials ({proto}): <code>{v}</code>. Anyone on the path can read them; use an encrypted protocol (HTTPS, SFTP, SSH).',
+          retrans: 'Frame {p}: TCP retransmission of frame {of} (no acknowledgement in time).',
+          scan: 'Port scan: <code>{src}</code> sent SYNs to {n} different ports of <code>{dst}</code> ({ports}).',
+          nxdomain: 'Frame {p}: the name <code>{v}</code> does not exist (DNS "NXDOMAIN" answer).',
+          csum: 'Frame {p}: incorrect checksum (corrupted frame or checksum offloaded to the network card).',
+          summary: '{hs} complete TCP handshake(s) over {st} streams, {rst} stream(s) reset, {un} unanswered SYN.',
+        },
+      },
+    };
+    let lang = 'fr';
+    try { lang = localStorage.getItem('lang') || ((navigator.language || 'fr').toLowerCase().startsWith('fr') ? 'fr' : 'en'); } catch (e) {}
+    if (!T[lang]) lang = 'fr';
+    const t = (k) => T[lang][k];
+    const num = (v, d) => v.toLocaleString(lang === 'fr' ? 'fr-FR' : 'en-GB', { maximumFractionDigits: d || 0 });
+    const fill = (s, o) => s.replace(/\{(\w+)\}/g, (_, k) => (o[k] != null ? o[k] : ''));
+
+    let res = null, shown = [], sel = -1, filterSrc = '';
+
+    // ---------- Chargement ----------
+    function open(buf, name) {
+      try { res = P.load(buf); }
+      catch (e) { res = null; $('fname').textContent = t('readErr') + e.message; renderAll(); return; }
+      $('fname').textContent = name + ' · ' + res.cap.format + ' · ' + (P.LINK[res.cap.linktype] || 'lien ' + res.cap.linktype);
+      sel = -1; renderAll();
+      if (res.list.length) select(0);
+    }
+    const sampleBuf = () => E.toPcap(E.build());
+    $('sample').addEventListener('click', () => open(sampleBuf(), 'exemple-telerad.pcap'));
+    $('dlSample').addEventListener('click', () => {
+      const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([sampleBuf()], { type: 'application/vnd.tcpdump.pcap' }));
+      a.download = 'exemple-telerad.pcap'; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 0);
+    });
+    const readFile = (f) => { if (!f) return; const r = new FileReader(); r.onload = () => open(r.result, f.name); r.readAsArrayBuffer(f); };
+    $('file').addEventListener('change', () => readFile($('file').files[0]));
+    const drop = $('drop');
+    drop.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); $('file').click(); } });
+    ['dragenter', 'dragover'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add('over'); }));
+    ['dragleave', 'drop'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove('over'); }));
+    drop.addEventListener('drop', (e) => readFile(e.dataTransfer.files[0]));
+
+    // ---------- Rendu ----------
+    function renderAll() { renderKpis(); applyFilter(); renderAnalysis(); }
+    function renderKpis() {
+      if (!res) { $('kpis').innerHTML = ''; return; }
+      const s = res.stats;
+      const k = (key, v, cls) => '<div class="kpi ' + (cls || '') + '"><dt>' + esc(t(key)) + '</dt><dd>' + v + '</dd></div>';
+      $('kpis').innerHTML = k('kPk', num(res.list.length)) + k('kDur', num(s.duration, 2) + ' s') + k('kBytes', num(s.bytes)) + k('kStreams', num(s.streams)) + k('kHs', num(s.handshakes)) +
+        k('kAl', num(s.alerts.filter((a) => a.lvl !== 'info').length), s.alerts.some((a) => a.lvl === 'err') ? 'alert' : '');
+    }
+    function applyFilter() {
+      const box = $('list');
+      if (!res) { box.innerHTML = '<p class="empty">' + esc(t('noFile')) + '</p>'; $('tree').innerHTML = ''; $('hex').innerHTML = ''; return; }
+      let f;
+      try { f = P.compileFilter(filterSrc); $('flt').classList.remove('bad'); $('ferr').textContent = ''; }
+      catch (e) { $('flt').classList.add('bad'); $('ferr').textContent = e.message; return; }
+      shown = res.list.filter(f);
+      const t0 = res.list.length ? res.list[0].ts : 0;
+      const danger = new Set(res.stats.alerts.filter((a) => a.lvl === 'err' && a.pkt != null).map((a) => a.pkt));
+      const warn = new Set(res.stats.alerts.filter((a) => a.lvl === 'warn' && a.pkt != null).map((a) => a.pkt));
+      if (!shown.length) { box.innerHTML = '<p class="empty">' + esc(t('none')) + '</p>'; return; }
+      box.innerHTML = '<table><thead><tr><th>' + t('hNo') + '</th><th>' + t('hTime') + '</th><th>' + t('hSrc') + '</th><th>' + t('hDst') + '</th><th>' + t('hProto') + '</th><th>' + t('hLen') + '</th><th>' + t('hInfo') + '</th></tr></thead><tbody>' +
+        shown.map((p) => '<tr data-i="' + p.index + '" class="' + (danger.has(p.index) ? 'danger' : warn.has(p.index) ? 'flag' : '') + '" aria-selected="' + (p.index === sel) + '"><td>' + (p.index + 1) + '</td><td>' + num(p.ts - t0, 6) + '</td><td>' + esc(p.src) + '</td><td>' + esc(p.dst) + '</td><td><span class="pr">' + esc(p.proto) + '</span></td><td>' + p.len + '</td><td class="info">' + esc(p.info) + (p.retrans != null ? ' [retransmission]' : '') + '</td></tr>').join('') + '</tbody></table>';
+    }
+    $('list').addEventListener('click', (e) => { const tr = e.target.closest('tr[data-i]'); if (tr) select(+tr.dataset.i); });
+    $('list').addEventListener('keydown', (e) => {
+      if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+      e.preventDefault(); const k = shown.findIndex((p) => p.index === sel); const n = shown[Math.max(0, Math.min(shown.length - 1, k + (e.key === 'ArrowDown' ? 1 : -1)))]; if (n) select(n.index);
+    });
+    $('list').tabIndex = 0;
+
+    function select(i) {
+      sel = i;
+      document.querySelectorAll('#list tr[data-i]').forEach((tr) => tr.setAttribute('aria-selected', +tr.dataset.i === i));
+      const tr = document.querySelector('#list tr[data-i="' + i + '"]'); if (tr) tr.scrollIntoView({ block: 'nearest' });
+      const p = res.list[i], data = res.cap.packets[i].data;
+      $('detailT').textContent = t('detailT') + ' ' + (i + 1);
+      // arbre
+      const node = (n, depth) => {
+        const bad = /INCORRECTE/.test(n.value) ? ' bad' : '';
+        const label = '<span class="k">' + esc(n.name) + '</span>' + (n.value ? ' <span class="v">: ' + esc(n.value) + '</span>' : '');
+        const attrs = ' data-o="' + n.off + '" data-l="' + n.len + '"';
+        if (n.children && n.children.length) return '<details class="' + (depth === 0 ? 'layer' : '') + bad + '"' + (depth === 0 && n.name !== p.tree[0].name ? ' open' : '') + '><summary' + attrs + '>' + label + '</summary>' + n.children.map((c) => node(c, depth + 1)).join('') + '</details>';
+        return '<div class="leaf' + bad + '"' + attrs + '>' + label + '</div>';
+      };
+      $('tree').innerHTML = p.tree.map((n) => node(n, 0)).join('');
+      // hexa
+      let h = '';
+      for (let o = 0; o < data.length; o += 16) {
+        let hx = '', as = '';
+        for (let k = 0; k < 16; k++) {
+          const b = data[o + k];
+          if (b === undefined) { hx += '   '; continue; }
+          hx += '<span class="b" data-b="' + (o + k) + '">' + b.toString(16).padStart(2, '0') + '</span> ';
+          as += '<span class="a" data-b="' + (o + k) + '">' + esc(b >= 32 && b < 127 ? String.fromCharCode(b) : '.') + '</span>';
+          if (k === 7) hx += ' ';
+        }
+        h += '<span class="o">' + o.toString(16).padStart(4, '0') + '</span>  ' + hx + ' ' + as + '\n';
+      }
+      $('hex').innerHTML = h;
+    }
+    function highlight(off, len) {
+      document.querySelectorAll('#hex .on').forEach((x) => x.classList.remove('on'));
+      for (let b = off; b < off + len; b++) document.querySelectorAll('#hex [data-b="' + b + '"]').forEach((x) => x.classList.add('on'));
+      const first = document.querySelector('#hex [data-b="' + off + '"]'); if (first) first.scrollIntoView({ block: 'nearest' });
+    }
+    $('tree').addEventListener('click', (e) => {
+      const el = e.target.closest('[data-o]'); if (!el) return;
+      document.querySelectorAll('#tree .on').forEach((x) => x.classList.remove('on')); el.classList.add('on');
+      highlight(+el.dataset.o, +el.dataset.l);
+    });
+
+    function renderAnalysis() {
+      const ul = $('alerts');
+      if (!res) { ul.innerHTML = ''; $('bars').innerHTML = ''; $('convs').innerHTML = ''; return; }
+      const s = res.stats;
+      const items = s.alerts.slice().sort((a, b) => ({ err: 0, warn: 1, info: 2 }[a.lvl] - { err: 0, warn: 1, info: 2 }[b.lvl]));
+      let html = '<li class="info" data-p=""><span class="lv">' + esc(t('lvInfo')) + '</span><span>' + esc(fill(t('a').summary, { hs: s.handshakes, st: s.streams, rst: s.resets, un: s.unanswered })) + '</span></li>';
+      if (!items.length) html += '<li class="ok">' + esc(t('allGood')) + '</li>';
+      html += items.map((a) => {
+        const o = { p: a.pkt != null ? a.pkt + 1 : '', of: a.of != null ? a.of + 1 : '', proto: esc(a.proto || ''), v: esc(a.value || ''), src: esc(a.src || ''), dst: esc(a.dst || ''), n: a.n, ports: a.ports ? esc(a.ports.slice(0, 16).join(', ')) : '' };
+        return '<li class="' + a.lvl + '" data-p="' + (a.pkt != null ? a.pkt : a.code === 'scan' ? 'scan:' + a.src : '') + '"><span class="lv">' + esc(t(a.lvl === 'err' ? 'lvErr' : a.lvl === 'warn' ? 'lvWarn' : 'lvInfo')) + '</span><span>' + fill(t('a')[a.code], o) + '</span></li>';
+      }).join('');
+      ul.innerHTML = html;
+      const counts = Object.entries(s.protoCount).sort((a, b) => b[1] - a[1]), max = counts.length ? counts[0][1] : 1;
+      $('bars').innerHTML = counts.map(([k, v]) => '<div class="bar"><span>' + esc(k) + '</span><i style="width:' + (v / max) * 100 + '%"></i><b>' + v + '</b></div>').join('');
+      $('convs').innerHTML = '<table><thead><tr><th>' + t('hA') + '</th><th>' + t('hB') + '</th><th>' + t('hPk') + '</th><th>' + t('hBy') + '</th></tr></thead><tbody>' +
+        s.convs.slice(0, 12).map((c) => '<tr><td>' + esc(c.a) + '</td><td>' + esc(c.b) + '</td><td>' + c.pkts + '</td><td>' + num(c.bytes) + '</td></tr>').join('') + '</tbody></table>';
+    }
+    $('alerts').addEventListener('click', (e) => {
+      const li = e.target.closest('li[data-p]'); if (!li || li.dataset.p === '') return;
+      if (li.dataset.p.startsWith('scan:')) { setFilter('ip.src == ' + li.dataset.p.slice(5) + ' and tcp'); return; }
+      if (filterSrc) setFilter('');
+      select(+li.dataset.p);
+    });
+
+    // ---------- Filtre ----------
+    const CHIPS = ['tcp', 'dns', 'http or ftp', 'arp', 'icmp', 'tcp.port == 443', 'vlan == 10', 'ip.addr == 192.168.11.10', 'not tcp'];
+    $('chips').innerHTML = CHIPS.map((c) => '<button type="button" data-f="' + esc(c) + '">' + esc(c) + '</button>').join('') + '<button type="button" data-f="">×</button>';
+    $('chips').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) setFilter(b.dataset.f); });
+    function setFilter(f) { filterSrc = f; $('flt').value = f; applyFilter(); }
+    $('fltApply').addEventListener('click', () => setFilter($('flt').value));
+    $('flt').addEventListener('keydown', (e) => { if (e.key === 'Enter') setFilter($('flt').value); });
+
+    function setLang(l) {
+      lang = l; document.documentElement.lang = l;
+      document.querySelectorAll('[data-t]').forEach((el) => { const v = T[l][el.dataset.t]; if (typeof v === 'string') el.innerHTML = v; });
+      document.title = l === 'fr' ? 'Analyseur de trames réseau' : 'Network frame analyser';
+      document.querySelectorAll('.lang button').forEach((b) => b.setAttribute('aria-pressed', b.dataset.lang === l));
+      try { localStorage.setItem('lang', l); } catch (e) {}
+      renderAll(); if (res && sel >= 0) select(sel);
+    }
+    document.querySelectorAll('.lang button').forEach((b) => b.addEventListener('click', () => setLang(b.dataset.lang)));
+    setLang(lang);
+    open(sampleBuf(), 'exemple-telerad.pcap');
+  })();
+  </script>
+</body>
+</html>
